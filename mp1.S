@@ -84,8 +84,15 @@ mp1_rtc_tasklet:
 
 .globl mp1_ioctl
 mp1_ioctl:
+		movl 8(%esp), %eax
+		cmpl 4,%eax
+		ja invalid
+		jmp *jumptable(,%eax,4)
+		
+		
+invalid:
+		movl $-1, %eax
 		ret
-
 
 # ----------------- Functions private to this file -------------------
 
@@ -93,9 +100,72 @@ update_missiles:
 		ret
 
 mp1_ioctl_startgame:
+		pushl %ebp
+		movl %esp, %ebp
+		pushl %ebx
+		pushl %esi
+		pushl %edi
+		
+		movl $0, mp1_missile_list
+		movl 0xFFFFFF00, base_alive
+		movl $0, mp1_score
+		movl $40, crosshairs_x
+		movl $12, crosshairs_y
+		
+		popl %edi
+		popl %esi
+		popl %ebx
+		leave
 		ret
 
 mp1_ioctl_addmissile:
+		pushl %ebp
+		movl %esp, %ebp
+		pushl %ebx
+		pushl %esi
+		pushl %edi
+
+		movl 8(%ebp),%edi
+		
+		#caller save register
+		pushl %ecx
+		pushl %edx
+
+		#push parameter
+		pushl $36
+		call mp_1malloc
+		addl $4,%esp
+		#restore register
+		popl %edx
+		popl %ecx
+		
+		cmpl $0,%eax
+		je free ########## undone if fail
+		
+		#caller save registers
+		pushl %ecx
+		pushl %edx
+		pushl %eax
+		
+		#push parameter		
+		pushl $36
+		pushl %edi
+		pushl %eax
+		call mp1_copy_from_user   ##########if fail
+		addl $12,%esp
+		
+		#restore registers
+		popl %eax
+		popl %edx
+		popl %ecx
+		
+		movl mp1_missile_list, (%eax)
+		movl %eax,mp1_missile_list
+		
+		popl %edi
+		popl %esi
+		popl %ebx
+		leave
 		ret
 
 mp1_ioctl_movexhairs:
@@ -106,3 +176,6 @@ mp1_ioctl_getstatus:
 
 mp1_ioctl_endgame:
 		ret
+
+jumptable:
+.long mp1_ioctl_startgame, mp1_ioctl_addmissile, mp1_ioctl_movexhairs, mp1_ioctl_getstatus, mp1_ioctl_endgame
