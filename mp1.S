@@ -154,6 +154,8 @@ mp1_ioctl_addmissile:
 		call mp1_copy_from_user   ##########if fail
 		addl $12,%esp
 		
+		cmpl $0,%eax
+		jne free
 		#restore registers
 		popl %eax
 		popl %edx
@@ -165,14 +167,151 @@ mp1_ioctl_addmissile:
 		popl %edi
 		popl %esi
 		popl %ebx
+		movl $0,%eax
 		leave
 		ret
 
+		free:
+	#caller save register
+		pushl %ecx
+		pushl %edx
+		pushl %eax
+		
+		#push parameter
+		pushl %eax
+		#call free
+		call mp_1free
+		addl $4,%esp
+		
+		#restore 
+		popl %eax
+		popl %edx
+		popl %ecx
+		
+		movl $-1,%eax
+		popl %edi
+		popl %esi
+		popl %ebx
+		leave
+		ret
+		
 mp1_ioctl_movexhairs:
+		#callee save
+		pushl %ebp
+		movl %esp, %ebp
+		pushl %ebx
+		pushl %esi
+		pushl %edi
+		
+		movl 8(%ebp),%esi  #get x,y from the stack
+		xorl %ebx,%ebx   #clear ebx
+		movw %si,%bx	#move low si to bx :x value
+		sall $16,%bx
+		sarl $16,%bx
+		sarl $16,%esi	#shift esi to right 16bits: y value  
+		
+		addl crosshairs_y,%esi
+		cmpl $0,%esi
+		jl less_than_zero_y
+		cmpl $24,%esi
+		jg greater_than_24_y
+		jmp update_y   
+		
+		
+		addl %ebx,crosshairs_x
+		cmpl $0,%ebx
+		jl less_than_zero_x
+		cmpl $79,%ebx
+		jg greater_than_79_x
+		jmp update_x 		
+		
+		
+		less_than_zero_y:
+		movl $0,%esi
+		jmp update_y
+		
+		greater_than_24_y:
+		movl $24,$esi
+		jmp update_y
+		
+		less_than_zero_x:
+		movl $0,$ebx
+		jmp update_x
+		
+		greater_than_79_x:
+		movl $79,%ebx
+		jmp update_x
+		
+		update_x:
+		movl %ebx,crosshairs_x
+		jmp draw
+		
+		update_y:
+		movl %esi,crosshairs_y
+		jmp draw
+		
+		draw:
+		imull $80,crosshairs_y,%eax 	#80*y
+		addl crosshairs_x,%eax			#80*y+x
+		shll $1,%eax					#(80*y+x)*2
+		movw 0x2B,%cl					#move "+" into cl
+		
+		pushl %edx
+		call mp1_poke
+		popl %edx		
+		
+		movl $0,%eax					#return 0
+		#callee save
+		popl %edi
+		popl %esi
+		popl %ebx
+		leave
 		ret
-
+		
 mp1_ioctl_getstatus:
-		ret
+		#callee save
+		pushl %ebp
+		movl %esp, %ebp
+		pushl %ebx
+		pushl %esi
+		pushl %edi
+
+		movl 8(%ebp),%esi
+		
+		movl base_alive,%edi
+		xorl %ebx,%ebx    #ebx stores the return value
+	#eax is the counter
+		movl $2,%eax
+		loop:
+		
+		cmpl $0,%eax
+		jl loop_done
+		addl $-1,%eax
+		cmpl $0,%edi
+		jl alive_one
+		sall $1,%ebx
+		jmp move_next
+		alive_one:
+		addl $1,%ebx
+		sall $1,%ebx
+		move_next:
+		sall $8,%edi
+		jmp loop
+		
+		loop_done:
+		sall $16,%ebx    ##make room for score
+		movl mp1_score,%ecx
+		movw %cx,%bx
+		
+		
+		
+		
+		#callee save
+		popl %edi
+		popl %esi
+		popl %ebx
+		leave
+		ret		
 
 mp1_ioctl_endgame:
 		ret
