@@ -71,6 +71,57 @@ mp1_poke:
 
 .globl mp1_rtc_tasklet
 mp1_rtc_tasklet:
+		##callee saved
+		pushl %ebp  
+		movl %esp, %ebp
+		pushl %ebx
+		pushl %esi
+		pushl %edi
+		####traverse needed
+
+		movl mp1_missile_list, %ebx
+		cmpl $0,%ebx
+		je done_traverse		##if head is null, jump out of traverse
+traverse_loop:		
+		#caller save for update_missiles
+		pushl %ecx
+		pushl %edx
+		pushl %eax
+		
+		pushl %ebx				##push the pointer of current missile in the struct as parameter
+		call update_missiles
+		#caller tear down for update_missiles
+		addl $4,%esp
+		popl %eax
+		popl %edx
+		popl %ecx
+		cmpl $0,(%ebx)			#check whether next missile is null		
+		je done_traverse
+		movl (%ebx),%ebx		#traverse to next missile
+		jmp traverse_loop
+	
+done_traverse:
+
+						#ecx as the base pic carrier
+		movl $2,%esi	#set esi as city counter
+		movl $4,%edi	#set edi as the char counter
+		movl base_alive, %edx 	#put base status into edx
+		cmpl $0,%esi
+		jl city_loop_done
+		cmpl
+		cmpl $0,%edi
+		jl char_loop_done
+		
+		call mp1_poke ####redraw city
+
+		call mp1_poke ###redraw crosshairs
+
+
+		#callee tear down
+		popl %edi
+		popl %esi
+		popl %ebx
+		leave
 		ret
 
 # int mp1_ioctl(unsigned long arg, unsigned int cmd)
@@ -97,7 +148,141 @@ invalid:
 # ----------------- Functions private to this file -------------------
 
 update_missiles:
+		##callee saved
+		pushl %ebp  
+		movl %esp, %ebp
+		pushl %ebx
+		pushl %esi
+		pushl %edi
+		
+		movl 8(%ebp),%ebx  ## get pointer to the missile struct
+		movl 4(%ebx),%esi  ## get x
+		movl 8(%ebx),%edi  ## get y
+
+		cmpl $0,%esi
+		jl out_of_bound
+		cmpl $79,%esi
+		jg out_of_bound
+		cmpl $0,%edi
+		jl out_of_bound
+		cmpl $24,%edi
+		jl out_of_bound
+		
+		#################################normal
+		movl 20(%ebx),%ecx ##get dest_x
+		movl 24(%ebx),%edx ##get dest_y
+
+		##check whether at destination
+		cmpl %ecx,%esi
+		jne check_explosion
+		cmpl %edx,%ebx
+		je explosion_start
+
+check_explosion:
+		movl 28(%ebx),%esi		###move EXPLODED to esi and check whether it's exploding
+		cmpl $0,%esi
+		je move_missile
+		
+		
+		############call explosion		
+		#caller save
+explosion_start:
+
+		pushl %ecx
+		pushl %edx	
+
+		pushl %ebx
+		call missile_explode
+		addl $4,%esp
+		#caller restore
+		popl %edx
+		popl %ecx
+		cmpl $0,%eax
+		je change_counter
+
+		#call mp1_notify_user
+		pushl %ecx
+		pushl %edx
+		pushl %eax
+
+		call mp1_notify_user
+		popl %eax
+		popl %edx
+		popl %ecx			
+		
+		
+change_counter:		
+		addl $-1,28(%ebx)
+		cmpl $0,28(%ebx)
+		je	out_of_bound
+
+		##########draw @
+		imull $160,8(%ebx),%esi	
+		movl 4(%ebx),%edi
+		shll $1,%edi
+		addl %edi,%eax	##############################need to store eax somewhere because eax stores return value from missile_explode				
+		movb $0x40,%cl					
+		pushl %edx
+		call mp1_poke
+		popl %edx		
+		jmp update_return
+
+move_missile:
+		imull $160,8(%ebx),%esi	
+		movl 4(%ebx),%edi
+		shll $1,%edi
+		addl %edi,%eax	##############################need to store eax somewhere because eax stores return value from missile_explode				
+		movl $0x20,%ecx					
+		pushl %edx
+		call mp1_poke
+		popl %edx		
+
+		movl 4(%ebx),%esi  ## get x
+		movl 8(%ebx),%edi  ## get y
+		addl 12(%ebx),%esi	##x+vx
+		addl 16(%ebx),%edi	##y+vy
+		movl %esi,4(%ebx)
+		movl %edi,8(%ebx)
+		
+		imull $160,8(%ebx),%esi	
+		movl 4(%ebx),%edi
+		shll $1,%edi
+		addl %edi,%eax	##############################need to store eax somewhere because eax stores return value from missile_explode				
+		movl 32(%ebx),%ecx					
+		pushl %edx
+		call mp1_poke
+		popl %edx		
+		jmp update_return
+
+		
+out_of_bound:			####if it's out of bound or the exploded counter is 0
+		#caller save 
+		pushl %ecx
+		pushl %edx
+		pushl %eax
+		
+		pushl %ebx	#push parameter of the pointer
+		call mp1_missile_remove
+		addl $4,%esp
+		#caller tear down 
+		popl %eax
+		popl %edx
+		popl %ecx		
+		
+update_return:
+		#callee tear down
+		popl %edi
+		popl %esi
+		popl %ebx
+		leave
 		ret
+		
+		
+mp1_missile_remove:
+		ret
+
+
+	
 
 mp1_ioctl_startgame:
 		pushl %ebp
@@ -354,3 +539,7 @@ mp1_ioctl_endgame:
 
 jumptable:
 .long mp1_ioctl_startgame, mp1_ioctl_addmissile, mp1_ioctl_movexhairs, mp1_ioctl_getstatus, mp1_ioctl_endgame
+
+
+
+ 
