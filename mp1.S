@@ -85,7 +85,7 @@ mp1_rtc_tasklet:
 .globl mp1_ioctl
 mp1_ioctl:
 		movl 8(%esp), %eax
-		cmpl 4,%eax
+		cmpl $4,%eax
 		ja invalid
 		jmp *jumptable(,%eax,4)
 		
@@ -107,10 +107,12 @@ mp1_ioctl_startgame:
 		pushl %edi
 		
 		movl $0, mp1_missile_list
-		movl 0xFFFFFF00, base_alive
+		movl $0xffffff00, base_alive
 		movl $0, mp1_score
 		movl $40, crosshairs_x
 		movl $12, crosshairs_y
+
+
 		
 		popl %edi
 		popl %esi
@@ -125,22 +127,22 @@ mp1_ioctl_addmissile:
 		pushl %esi
 		pushl %edi
 
-		movl 8(%ebp),%edi
+		movl 8(%ebp),%edi  ##struct pointer
 		
 		#caller save register
 		pushl %ecx
 		pushl %edx
 
 		#push parameter
-		pushl $36
-		call mp_1malloc
+		pushl $36			#36 is the size of struct
+		call mp1_malloc
 		addl $4,%esp
 		#restore register
 		popl %edx
 		popl %ecx
 		
 		cmpl $0,%eax
-		je free ########## undone if fail
+		je malloc_fail ########## if return 0 fail
 		
 		#caller save registers
 		pushl %ecx
@@ -151,7 +153,7 @@ mp1_ioctl_addmissile:
 		pushl $36
 		pushl %edi
 		pushl %eax
-		call mp1_copy_from_user   ##########if fail
+		call mp1_copy_from_user   
 		addl $12,%esp
 		
 		cmpl $0,%eax
@@ -161,7 +163,8 @@ mp1_ioctl_addmissile:
 		popl %edx
 		popl %ecx
 		
-		movl mp1_missile_list, (%eax)
+		movl mp1_missile_list, %edx
+		movl %edx, (%eax)
 		movl %eax,mp1_missile_list
 		
 		popl %edi
@@ -171,7 +174,7 @@ mp1_ioctl_addmissile:
 		leave
 		ret
 
-		free:
+free:
 	#caller save register
 		pushl %ecx
 		pushl %edx
@@ -180,14 +183,15 @@ mp1_ioctl_addmissile:
 		#push parameter
 		pushl %eax
 		#call free
-		call mp_1free
+		call mp1_free
 		addl $4,%esp
 		
 		#restore 
 		popl %eax
 		popl %edx
 		popl %ecx
-		
+
+malloc_fail:	
 		movl $-1,%eax
 		popl %edi
 		popl %esi
@@ -206,55 +210,62 @@ mp1_ioctl_movexhairs:
 		movl 8(%ebp),%esi  #get x,y from the stack
 		xorl %ebx,%ebx   #clear ebx
 		movw %si,%bx	#move low si to bx :x value
-		sall $16,%bx
-		sarl $16,%bx
+		sall $16,%ebx
+		sarl $16,%ebx
 		sarl $16,%esi	#shift esi to right 16bits: y value  
 		
 		addl crosshairs_y,%esi
+		addl crosshairs_x,%ebx
 		cmpl $0,%esi
 		jl less_than_zero_y
 		cmpl $24,%esi
 		jg greater_than_24_y
-		jmp update_y   
-		
-		
-		addl %ebx,crosshairs_x
+		 
 		cmpl $0,%ebx
 		jl less_than_zero_x
 		cmpl $79,%ebx
 		jg greater_than_79_x
-		jmp update_x 		
+		jmp update		
 		
 		
-		less_than_zero_y:
+less_than_zero_y:
 		movl $0,%esi
-		jmp update_y
+		jmp update
 		
-		greater_than_24_y:
-		movl $24,$esi
-		jmp update_y
+greater_than_24_y:
+		movl $24,%esi
+		jmp update
 		
-		less_than_zero_x:
-		movl $0,$ebx
-		jmp update_x
+less_than_zero_x:
+		movl $0,%ebx
+		jmp update
 		
-		greater_than_79_x:
+greater_than_79_x:
 		movl $79,%ebx
-		jmp update_x
+		jmp update
 		
-		update_x:
+update:
+		imull $160,crosshairs_y,%eax 	
+		movl crosshairs_x,%edi
+		shll $1,%edi
+		addl %edi,%eax					
+		movb $0x20,%cl					
+		
+		pushl %edx
+		call mp1_poke
+		popl %edx		
+
+
 		movl %ebx,crosshairs_x
-		jmp draw
-		
-		update_y:
 		movl %esi,crosshairs_y
 		jmp draw
 		
-		draw:
-		imull $80,crosshairs_y,%eax 	#80*y
-		addl crosshairs_x,%eax			#80*y+x
-		shll $1,%eax					#(80*y+x)*2
-		movw 0x2B,%cl					#move "+" into cl
+draw:
+		imull $160,crosshairs_y,%eax 	
+		movl crosshairs_x,%edi
+		shll $1,%edi
+		addl %edi,%eax					
+		movb $0x2B,%cl					
 		
 		pushl %edx
 		call mp1_poke
@@ -276,15 +287,15 @@ mp1_ioctl_getstatus:
 		pushl %esi
 		pushl %edi
 
-		movl 8(%ebp),%esi
+		movl 8(%ebp),%esi #esi carries the pointer
 		
 		movl base_alive,%edi
 		xorl %ebx,%ebx    #ebx stores the return value
-	#eax is the counter
+						  #eax is the counter
 		movl $2,%eax
-		loop:
+loop:
 		
-		cmpl $0,%eax
+		cmpl $0,%eax	##loop to check the 3 cities
 		jl loop_done
 		addl $-1,%eax
 		cmpl $0,%edi
@@ -297,14 +308,39 @@ mp1_ioctl_getstatus:
 		move_next:
 		sall $8,%edi
 		jmp loop
-		
-		loop_done:
-		sall $16,%ebx    ##make room for score
-		movl mp1_score,%ecx
+
+loop_done:
+		sall $16,%ebx    	##make room for score
+		movl mp1_score,%ecx	
 		movw %cx,%bx
 		
+		pushl %ebx		    ##push the score onto the stack
+		movl %esp,%ecx
 		
+		##caller save
+		pushl %ecx
+		pushl %edx
+		pushl %eax
 		
+		pushl $4
+		pushl %ecx			##push the pointer to the score to the stack as parameter (from)
+		pushl %esi
+		call mp1_copy_to_user
+		addl $12,%esp
+		
+		cmpl $0,%eax
+		je copy_to_success
+		popl %eax
+		movl $-1,%eax
+		jmp status_done
+		##caller restore
+copy_to_success:
+		popl %eax
+		movl $0,%eax
+
+status_done:
+		popl %edx
+		popl %ecx		
 		
 		#callee save
 		popl %edi
