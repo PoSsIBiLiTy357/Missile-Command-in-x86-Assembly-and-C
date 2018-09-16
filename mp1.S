@@ -88,7 +88,7 @@ traverse_loop:
 		pushl %edx
 		pushl %eax
 		
-		movl %ebx,prev_pointer
+
 		pushl %ebx				##push the pointer of current missile in the struct as parameter
 		call update_missiles
 		#caller tear down for update_missiles
@@ -98,6 +98,7 @@ traverse_loop:
 		popl %ecx
 		cmpl $0,(%ebx)			#check whether next missile is null		
 		je done_traverse
+		movl %ebx,prev_pointer	##save the previous pointer to the label
 		movl (%ebx),%ebx		#traverse to next missile
 		jmp traverse_loop
 	
@@ -107,15 +108,16 @@ done_traverse:
 		movl $2,%esi	#set esi as city counter
 		movl $4,%edi	#set edi as the char counter
 		movl base_alive, %edx 	#put base status into edx
+		sall $8,%edx
 		##imull $160,$24,%eax		#initialize eax
 		##addl $36,%eax
-		movl $3876,%eax
+		movl $3956,%eax
 		############outer loop start
 outer_loop:	
 		cmpl $0,%esi
 		jl city_loop_done
 		cmpl $0,%edx
-		je city_dead
+		jge city_dead
 		movl $base_pic,%ebx
 		jmp city_alive
 city_dead:
@@ -137,7 +139,7 @@ inner_loop:
 		jmp inner_loop
 		############inner loop stop
 char_loop_done:
-		addl $32,%eax
+		addl $-48,%eax
 		sall $8,%edx
 		addl $-1,%esi
 		jmp outer_loop
@@ -205,17 +207,17 @@ update_missiles:
 		cmpl $0,%edi
 		jl out_of_bound
 		cmpl $24,%edi
-		jl out_of_bound
+		jg out_of_bound
 		
 		#################################normal
 		movl 20(%ebx),%ecx ##get dest_x
 		movl 24(%ebx),%edx ##get dest_y
 
 		##check whether at destination
-		cmpl %ecx,%esi
-		jne check_explosion
-		cmpl %edx,%ebx
-		je explosion_start
+		cmpl %ecx,%esi      ##check whether x = dest_x
+		jne check_explosion	##if not, go check whether it's exploding
+		cmpl %edx,%edi		##check wheether y = dest_y
+		je explosion_start	## if yes x = dest_x, y= dest_y 
 
 check_explosion:
 		movl 28(%ebx),%esi		###move EXPLODED to esi and check whether it's exploding
@@ -332,7 +334,11 @@ update_return:
 		
 		
 mp1_missile_remove:
-
+		pushl %ebp  
+		movl %esp, %ebp
+		pushl %ebx
+		pushl %esi
+		pushl %edi
 
 		ret
 
@@ -347,13 +353,11 @@ mp1_ioctl_startgame:
 		pushl %edi
 		
 		movl $0, mp1_missile_list
-		movl $0xffffff00, base_alive
+		movl $0x00ffffff, base_alive
 		movl $0, mp1_score
 		movl $40, crosshairs_x
 		movl $12, crosshairs_y
 
-
-		
 		popl %edi
 		popl %esi
 		popl %ebx
@@ -529,12 +533,13 @@ mp1_ioctl_getstatus:
 
 		movl 8(%ebp),%esi #esi carries the pointer
 		
-		movl base_alive,%edi
-		xorl %ebx,%ebx    #ebx stores the return value
-						  #eax is the counter
-		movl $2,%eax
+		movl base_alive,%edi	
+		sall $8,%edi
+		xorl %ebx,%ebx    #ebx stores the return value, clear it
+						  #eax is the city counter
+		movl $2,%eax	
 loop:
-		
+						  ########### get status of 3 cities
 		cmpl $0,%eax	##loop to check the 3 cities
 		jl loop_done
 		addl $-1,%eax
@@ -542,15 +547,15 @@ loop:
 		jl alive_one
 		sall $1,%ebx
 		jmp move_next
-		alive_one:
+alive_one:
 		addl $1,%ebx
 		sall $1,%ebx
-		move_next:
+move_next:
 		sall $8,%edi
 		jmp loop
 
 loop_done:
-		sall $16,%ebx    	##make room for score
+		sall $15,%ebx    	##make room for score
 		movl mp1_score,%ecx	
 		movw %cx,%bx
 		
