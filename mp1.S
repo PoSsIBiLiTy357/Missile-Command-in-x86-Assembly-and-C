@@ -38,7 +38,7 @@ base_pic:     	    .string "/^^^\\"	# Picture of a live base
 dead_base_pic: 	    .string "xxxxx"	# Picture of a dead base
 crosshairs_x:		.long 0x0	# X-position of the crosshairs
 crosshairs_y:		.long 0x0	# Y-position of the crosshairs
-
+prev_pointer:       .long 0x0 	# temp saving for previous pointer for calling remove
 .text
 
 # void mp1_poke(void);
@@ -88,6 +88,7 @@ traverse_loop:
 		pushl %edx
 		pushl %eax
 		
+		movl %ebx,prev_pointer
 		pushl %ebx				##push the pointer of current missile in the struct as parameter
 		call update_missiles
 		#caller tear down for update_missiles
@@ -101,20 +102,57 @@ traverse_loop:
 		jmp traverse_loop
 	
 done_traverse:
-
-						#ecx as the base pic carrier
+						#start draw cities
+						#ebx as the city pic address carrier
 		movl $2,%esi	#set esi as city counter
 		movl $4,%edi	#set edi as the char counter
 		movl base_alive, %edx 	#put base status into edx
+		##imull $160,$24,%eax		#initialize eax
+		##addl $36,%eax
+		movl $3876,%eax
+		############outer loop start
+outer_loop:	
 		cmpl $0,%esi
 		jl city_loop_done
-		cmpl
+		cmpl $0,%edx
+		je city_dead
+		movl $base_pic,%ebx
+		jmp city_alive
+city_dead:
+		movl $dead_base_pic,%ebx
+		############inner loop start
+city_alive:
+		movl $4,%edi
+inner_loop:
+
 		cmpl $0,%edi
 		jl char_loop_done
+		movl (%ebx),%ecx
+		pushl %edx
+		call mp1_poke
+		popl %edx		
+		addl $2,%eax	####move right in the screen
+		addl $1,%ebx	####next char
+		addl $-1,%edi	####decrement the inner counter
+		jmp inner_loop
+		############inner loop stop
+char_loop_done:
+		addl $32,%eax
+		sall $8,%edx
+		addl $-1,%esi
+		jmp outer_loop
+		############outer loop stop
+city_loop_done:		
+		#redraw crosshairs
+		imull $160,crosshairs_y,%eax 	
+		movl crosshairs_x,%edi
+		shll $1,%edi
+		addl %edi,%eax					
+		movb $0x2B,%cl					
 		
-		call mp1_poke ####redraw city
-
-		call mp1_poke ###redraw crosshairs
+		pushl %edx
+		call mp1_poke
+		popl %edx
 
 
 		#callee tear down
@@ -157,8 +195,9 @@ update_missiles:
 		
 		movl 8(%ebp),%ebx  ## get pointer to the missile struct
 		movl 4(%ebx),%esi  ## get x
+		sarl $16,%esi
 		movl 8(%ebx),%edi  ## get y
-
+		sarl $16,%edi
 		cmpl $0,%esi
 		jl out_of_bound
 		cmpl $79,%esi
@@ -217,37 +256,51 @@ change_counter:
 		je	out_of_bound
 
 		##########draw @
-		imull $160,8(%ebx),%esi	
+		movl 8(%ebx),%esi
+		sarl $16,%esi
+		imull $160,%esi,%esi	##########################################need to change x y
 		movl 4(%ebx),%edi
+		sarl $16,%edi
 		shll $1,%edi
-		addl %edi,%eax	##############################need to store eax somewhere because eax stores return value from missile_explode				
+		addl %edi,%esi
+		movl %esi,%eax
 		movb $0x40,%cl					
 		pushl %edx
 		call mp1_poke
 		popl %edx		
 		jmp update_return
 
-move_missile:
-		imull $160,8(%ebx),%esi	
+move_missile:                   
+		movl 8(%ebx),%esi
+		sarl $16,%esi
+		imull $160,%esi,%esi	
 		movl 4(%ebx),%edi
+		sarl $16,%edi
 		shll $1,%edi
-		addl %edi,%eax	##############################need to store eax somewhere because eax stores return value from missile_explode				
+		addl %edi,%esi
+		movl %esi,%eax
 		movl $0x20,%ecx					
 		pushl %edx
 		call mp1_poke
 		popl %edx		
 
-		movl 4(%ebx),%esi  ## get x
-		movl 8(%ebx),%edi  ## get y
-		addl 12(%ebx),%esi	##x+vx
-		addl 16(%ebx),%edi	##y+vy
+		movl 12(%ebx),%esi  ## get vx
+
+		movl 16(%ebx),%edi  ## get vy
+
+		addl 4(%ebx),%esi	##x+vx
+		addl 8(%ebx),%edi	##y+vy
 		movl %esi,4(%ebx)
 		movl %edi,8(%ebx)
 		
-		imull $160,8(%ebx),%esi	
-		movl 4(%ebx),%edi
+		movl 8(%ebx),%esi	###get y
+		sarl $16,%esi
+		imull $160,%esi,%esi	
+		movl 4(%ebx),%edi	###get x
+		sarl $16,%edi
 		shll $1,%edi
-		addl %edi,%eax	##############################need to store eax somewhere because eax stores return value from missile_explode				
+		addl %edi,%esi
+		movl %esi,%eax
 		movl 32(%ebx),%ecx					
 		pushl %edx
 		call mp1_poke
@@ -279,6 +332,8 @@ update_return:
 		
 		
 mp1_missile_remove:
+
+
 		ret
 
 
