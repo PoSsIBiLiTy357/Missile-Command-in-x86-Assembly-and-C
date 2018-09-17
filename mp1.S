@@ -583,7 +583,7 @@ mp1_ioctl_movexhairs:
 		movl 8(%ebp),%esi  #get delta x,y from the stack
 		xorl %ebx,%ebx   #clear ebx
 		movw %si,%bx	#move low si to bx :get x value
-		sall $16,%ebx	sign extend x value
+		sall $16,%ebx	#sign extend x value
 		sarl $16,%ebx
 		sarl $16,%esi	#shift esi to right 16bits: y value  
 		
