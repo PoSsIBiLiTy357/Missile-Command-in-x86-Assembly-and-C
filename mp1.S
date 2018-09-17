@@ -77,41 +77,48 @@ mp1_rtc_tasklet:
 		pushl %ebx
 		pushl %esi
 		pushl %edi
+
+
+
 		####traverse needed
-
-		movl mp1_missile_list, %ebx
-		cmpl $0,%ebx
-		je done_traverse		##if head is null, jump out of traverse
-traverse_loop:		
-		#caller save for update_missiles
-		pushl %ecx
-		pushl %edx
-		pushl %eax
+        movl mp1_missile_list, %edx ###initialize with head
+		movl $0, %ecx				###initialize with previous node. it's 0 first since current is head
 		
+traverse_loop:
+		######first check whether current is null
+        cmpl $0, %edx
+        je traverse_done
 
-		pushl %ebx				##push the pointer of current missile in the struct as parameter
-		call update_missiles
-		#caller tear down for update_missiles
-		addl $4,%esp
+		##########caller save  (not saving ecx edx because they are used as pointer in the traversal, they may change when removed)
+		pushl %eax
+
+		pushl %edx						#######ecx stores previous pointer. parameter
+		pushl %ecx						#######edx sotres current pointer.	parameter
+        call update_missiles
+		addl $8, %esp
+		##########caller pop		
 		popl %eax
-		popl %edx
-		popl %ecx
-		cmpl $0,(%ebx)			#check whether next missile is null		
-		je done_traverse
-		movl %ebx,prev_pointer	##save the previous pointer to the label
-		movl (%ebx),%ebx		#traverse to next missile
-		jmp traverse_loop
-	
-done_traverse:
-						#start draw cities
-						#ebx as the city pic address carrier
+
+
+		#########change prev and curr for next cycle
+		movl %edx, %ecx			####prev = curr
+        #assign *next to cursor	
+        movl NEXT(%edx), %edx	####curr = curr->next
+        jmp traverse_loop
+
+
+traverse_done:
+
+		###################start draw cities
+		###################ebx as the city pic address carrier
 		movl $2,%esi	#set esi as city counter
 		movl $4,%edi	#set edi as the char counter
 		movl base_alive, %edx 	#put base status into edx
 		sall $8,%edx
-		##imull $160,$24,%eax		#initialize eax
-		##addl $36,%eax
-		movl $3956,%eax
+		movl $24,%eax		#initialize eax
+		imull $160,%eax,%eax		
+		addl $116,%eax
+
 		############outer loop start
 outer_loop:	
 		cmpl $0,%esi
@@ -195,11 +202,12 @@ update_missiles:
 		pushl %esi
 		pushl %edi
 		
-		movl 8(%ebp),%ebx  ## get pointer to the missile struct
+		movl 12(%ebp),%ebx  ## get pointer to the missile struct
 		movl 4(%ebx),%esi  ## get x
 		sarl $16,%esi
 		movl 8(%ebx),%edi  ## get y
 		sarl $16,%edi
+		####first check whether it's out of bound
 		cmpl $0,%esi
 		jl out_of_bound
 		cmpl $79,%esi
@@ -209,20 +217,20 @@ update_missiles:
 		cmpl $24,%edi
 		jg out_of_bound
 		
-		#################################normal
-		movl 20(%ebx),%ecx ##get dest_x
-		movl 24(%ebx),%edx ##get dest_y
+		####second check whether it's exploding
+		cmpl $0,28(%ebx)
+		jne explosion_start
+		
+	
+		##then check whether at destination
+		cmpl 20(%ebx),%esi      ##check whether x = dest_x
+		jne move_missile	##if not, go to move
+		cmpl 24(%ebx),%edi		##check wheether y = dest_y
+		jne move_missile	## if no, go to move 
 
-		##check whether at destination
-		cmpl %ecx,%esi      ##check whether x = dest_x
-		jne check_explosion	##if not, go check whether it's exploding
-		cmpl %edx,%edi		##check wheether y = dest_y
-		je explosion_start	## if yes x = dest_x, y= dest_y 
 
-check_explosion:
-		movl 28(%ebx),%esi		###move EXPLODED to esi and check whether it's exploding
-		cmpl $0,%esi
-		je move_missile
+
+
 		
 		
 		############call explosion		
@@ -253,14 +261,13 @@ explosion_start:
 		
 		
 change_counter:		
-		addl $-1,28(%ebx)
-		cmpl $0,28(%ebx)
-		je	out_of_bound
+	
+		
 
-		##########draw @
+		########## first draw @
 		movl 8(%ebx),%esi
 		sarl $16,%esi
-		imull $160,%esi,%esi	##########################################need to change x y
+		imull $160,%esi,%esi	
 		movl 4(%ebx),%edi
 		sarl $16,%edi
 		shll $1,%edi
@@ -269,10 +276,15 @@ change_counter:
 		movb $0x40,%cl					
 		pushl %edx
 		call mp1_poke
-		popl %edx		
+		popl %edx
+		########## change the counter and see whether it's 0. If 0, then we need remove it.
+		addl $-1,28(%ebx)
+		cmpl $0,28(%ebx)
+		je	out_of_bound		
 		jmp update_return
 
-move_missile:                   
+move_missile:  
+		#####first draw space to erase old
 		movl 8(%ebx),%esi
 		sarl $16,%esi
 		imull $160,%esi,%esi	
@@ -286,15 +298,15 @@ move_missile:
 		call mp1_poke
 		popl %edx		
 
+		###########then change xy
 		movl 12(%ebx),%esi  ## get vx
-
 		movl 16(%ebx),%edi  ## get vy
-
 		addl 4(%ebx),%esi	##x+vx
 		addl 8(%ebx),%edi	##y+vy
 		movl %esi,4(%ebx)
 		movl %edi,8(%ebx)
 		
+		#draw new missile
 		movl 8(%ebx),%esi	###get y
 		sarl $16,%esi
 		imull $160,%esi,%esi	
@@ -311,11 +323,7 @@ move_missile:
 
 		
 out_of_bound:			####if it's out of bound or the exploded counter is 0
-		#caller save 
-		pushl %ecx
-		pushl %edx
-		pushl %eax
-		
+		######first draw a space to erase old. then it should call remove
 		movl 8(%ebx),%esi
 		sarl $16,%esi
 		imull $160,%esi,%esi	
@@ -326,16 +334,22 @@ out_of_bound:			####if it's out of bound or the exploded counter is 0
 		movl %esi,%eax
 		movl $0x20,%ecx					
 		pushl %edx
-		
 		call mp1_poke
 		popl %edx		
-		pushl %ebx	#push parameter of the pointer
+		########get parameter from tasklet, and then use it in remove
+
+
+		movl 8(%ebp), %ecx		
+		movl 12(%ebp), %edx
+
+		pushl %eax        ####caller save
+		##############################not saving ecx and edx because they are pointer in the traversal in tasklet they might change during remove and the change is important
+		pushl %edx
+		pushl %ecx
 		call mp1_missile_remove
-		addl $4,%esp
-		#caller tear down 
-		popl %eax
-		popl %edx
-		popl %ecx		
+		addl $12,%esp
+		popl %eax		 ####caller restore
+
 		
 update_return:
 		#callee tear down
@@ -347,17 +361,70 @@ update_return:
 		
 		
 mp1_missile_remove:
-		pushl %ebp  
+		####### callee save
+		pushl %ebp
 		movl %esp, %ebp
 		pushl %ebx
 		pushl %esi
 		pushl %edi
 
+
+		########get edx = curr, ecx = prev, eax = curr->next
+		movl 12(%ebp),%edx
+		movl 8(%ebp),%ecx	
+		movl NEXT(%edx),%eax
+
+		#######check if curr is head. if not go check middle, if yes do head operation
+        cmpl mp1_missile_list, %edx
+        jne check_middle
+		#######remove head, head =curr->next 
+        movl %eax, mp1_missile_list
+		
+        jmp start_free
+
+    check_middle:
+        #check if it is tail, if no, go to tail operation. If yes, do middle operation 
+        cmpl $0,%eax
+        je tail
+        #check edx in middle, (%eax)<-%ecx=(%edx)
+		#prev->next = curr->next
+        movl %eax,NEXT(%ecx)
+        jmp start_free
+
+    tail:
+        #prev->next = null
+        movl $0, NEXT(%ecx)
+
+start_free:
+		#####caller save
+        pushl %ecx
+        pushl %edx
+        pushl %eax
+		
+		pushl %edx
+        call mp1_free
+		addl $4, %esp
+		#####caller restore
+        popl %eax
+        popl %edx
+        popl %ecx
+		
+ 
+		
+		cmpl mp1_missile_list, %eax	######check whether what we just removed is head
+		je head_change
+		movl %ecx, %edx		#######after removal, edx points to trash, we need to point it to previous node
+							#######so that it can go to the actual next node when returning to tasklet traversal
+        jmp update_return
+head_change:
+		movl %eax, %edx     #####if what we removed is head, make edx head
+
+		###########callee restore
 		popl %edi
 		popl %esi
 		popl %ebx
 		leave
-		ret
+		ret		
 
 
 	
@@ -604,7 +671,7 @@ status_done:
 		popl %edx
 		popl %ecx		
 		
-		#callee save
+		#callee restore
 		popl %edi
 		popl %esi
 		popl %ebx
@@ -612,8 +679,45 @@ status_done:
 		ret		
 
 mp1_ioctl_endgame:
+		####callee save
+		pushl %ebp
+		movl %esp, %ebp
+		pushl %ebx
+		pushl %esi
+		pushl %edi
+
+endgame_loop:
+		##########check whether head is null. if yes, end game is done
+		movl mp1_missile_list,%ebx
+		cmpl $0,%ebx				
+		je endgame_done
+		##########if not done, head =head->next		
+		movl NEXT(%ebx),%esi		
+		movl %esi,mp1_missile_list
+		########then free old head
+		####caller save
+		pushl %ecx
+		pushl %edx
+		pushl %eax
+
+		pushl %ebx
+        call mp1_free
+		addl $4, %esp
+		
+		####caller restore
+		popl %eax
+		popl %edx
+		popl %ecx
+		jmp endgame_loop
+endgame_done:
+		#callee restore
+		popl %edi
+		popl %esi
+		popl %ebx
+		leave		
 		ret
 
+		
 jumptable:
 .long mp1_ioctl_startgame, mp1_ioctl_addmissile, mp1_ioctl_movexhairs, mp1_ioctl_getstatus, mp1_ioctl_endgame
 
