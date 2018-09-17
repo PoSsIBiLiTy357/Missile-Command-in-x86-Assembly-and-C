@@ -20,8 +20,11 @@
     # Character to draw for an explosion - '@'
 
 	EXPLOSION = 64
-
-
+	CROSSHAIR = 0x2B
+	CITYRIGHT =116 ###right most city start location
+	POKECOL = 160	###column number *2
+	POKEROW = 24 ##row number
+	COL = 79
 # Data shared between this file and rtc.c helper functions
 
 # This '.globl' directive makes these symbols visible externally
@@ -92,10 +95,10 @@ traverse_loop:
 		##########caller save  (not saving ecx edx because they are used as pointer in the traversal, they may change when removed)
 		pushl %eax
 
-		pushl %edx						#######edx stores previous pointer. push parameter
-		pushl %ecx						#######ecx sotres current pointer.	push parameter
+		pushl %edx						#######edx stores current pointer. push parameter
+		pushl %ecx						#######ecx sotres previous pointer.	push parameter
         call update_missiles
-		addl $8, %esp
+		addl $8, %esp					####2 parameters
 		##########caller restore		
 		popl %eax
 
@@ -113,55 +116,58 @@ traverse_done:
 		####ebx as the city pic address carrier
 		####for(3 cities){
 		####     get status
-		####     outer_counter --
-		####	 for()
+		####     
+		####	 for(5 chars){
+		####			print 1 char
+		####			inner_counter--}
+		####	 outer_counter--}					
 		movl $2,%esi	#set esi as city counter
 		movl $4,%edi	#set edi as the char counter
 		movl base_alive, %edx 	#put base status into edx
 		sall $8,%edx			##shift 8 bits to eliminate padding
-		movl $24,%eax		#initialize eax
-		imull $160,%eax,%eax		##########################################################magic number
-		addl $116,%eax				##########################################################magic number
+		movl $POKEROW,%eax		#initialize eax
+		imull $POKECOL,%eax,%eax		
+		addl $CITYRIGHT,%eax			
 
 		############outer loop start
 outer_loop:	
 		cmpl $0,%esi
 		jl city_loop_done
 		cmpl $0,%edx
-		jge city_dead
+		jge city_dead				#####check whether the city is alive_one, and load the address of pic to ebx
 		movl $base_pic,%ebx
 		jmp city_alive
 city_dead:
 		movl $dead_base_pic,%ebx
 		############inner loop start
 city_alive:
-		movl $4,%edi
+		movl $4,%edi				####update inner counter
 inner_loop:
 
 		cmpl $0,%edi
-		jl char_loop_done
-		movl (%ebx),%ecx
+		jl char_loop_done			
+		movl (%ebx),%ecx			####get char to print
 		pushl %edx
 		call mp1_poke
 		popl %edx		
-		addl $2,%eax	####move right in the screen
+		addl $2,%eax	####move right in the screen, 1 location 2bytes
 		addl $1,%ebx	####next char
 		addl $-1,%edi	####decrement the inner counter
 		jmp inner_loop
 		############inner loop stop
 char_loop_done:
-		addl $-48,%eax
-		sall $8,%edx
-		addl $-1,%esi
+		addl $-48,%eax	####the right most char's location of one city - the leftmost char's location of its left neightbor city = 24, 24*2=48
+		sall $8,%edx	####2bytes = 8 bit shift to next city
+		addl $-1,%esi	####decrement the outer counter
 		jmp outer_loop
 		############outer loop stop
 city_loop_done:		
-		#redraw crosshairs
-		imull $160,crosshairs_y,%eax 	
+		#redraw crosshairs				#######80*2*y+x       edi temporary holds x 
+		imull $POKECOL,crosshairs_y,%eax 	
 		movl crosshairs_x,%edi
 		shll $1,%edi
 		addl %edi,%eax					
-		movb $0x2B,%cl					
+		movb $CROSSHAIR,%cl						
 		
 		pushl %edx
 		call mp1_poke
@@ -169,7 +175,7 @@ city_loop_done:
 
 
 		#callee tear down
-		popl %edi
+		popl %edi						
 		popl %esi
 		popl %ebx
 		leave
@@ -187,7 +193,7 @@ city_loop_done:
 .globl mp1_ioctl
 mp1_ioctl:
 		movl 8(%esp), %eax
-		cmpl $4,%eax
+		cmpl $4,%eax						####check invalid cmd
 		ja invalid
 		jmp *jumptable(,%eax,4)
 		
@@ -197,7 +203,15 @@ invalid:
 		ret
 
 # ----------------- Functions private to this file -------------------
-
+# void update_missiles(int* prev, int* curr);
+# Performs three tasks:
+#	(1) check whether explode. if so, update counter, draw correspond pattern, or remove
+#        
+#	(2) check whether out of bound. if so remove
+#	(3) update and redraw missile
+# Inputs   : prev = pointer to previous node of current node, curr = current node pointer
+# Outputs  : none
+# Registers: Standard C calling convention
 update_missiles:
 		##callee saved
 		pushl %ebp  
@@ -207,58 +221,57 @@ update_missiles:
 		pushl %edi
 		
 		movl 12(%ebp),%ebx  ## get pointer to the missile struct
-		movl 4(%ebx),%esi  ## get x
+		movl X(%ebx),%esi  ## get x
 		sarl $16,%esi
-		movl 8(%ebx),%edi  ## get y
+		movl Y(%ebx),%edi  ## get y
 		sarl $16,%edi
 		####first check whether it's out of bound
+		#################################################################################################magic number
 		cmpl $0,%esi
 		jl out_of_bound
-		cmpl $79,%esi
+		cmpl $COL,%esi
 		jg out_of_bound
 		cmpl $0,%edi
 		jl out_of_bound
-		cmpl $24,%edi
+		cmpl $POKEROW,%edi
 		jg out_of_bound
 		
 		####second check whether it's exploding
-		cmpl $0,28(%ebx)
+		cmpl $0,EXPLODED(%ebx)						##########################################################magic number
 		jne explosion_start
 		
 	
 		##then check whether at destination
-		cmpl 20(%ebx),%esi      ##check whether x = dest_x
-		jne move_missile	##if not, go to move
-		cmpl 24(%ebx),%edi		##check wheether y = dest_y
-		jne move_missile	## if no, go to move 
+		cmpl DEST_X(%ebx),%esi      ##check whether x = dest_x
+		jne move_missile	##if not, go to move the missile
+		cmpl DEST_Y(%ebx),%edi		##check wheether y = dest_y
+		jne move_missile	## if no, go to move the missile
 
 
-
-
-		
-		
 		############call explosion		
-		#caller save
+		
 explosion_start:
-
+		#caller save
 		pushl %ecx
 		pushl %edx	
-
+		#no eax because we will need the return value from missile_explode later
 		pushl %ebx
 		call missile_explode
 		addl $4,%esp
 		#caller restore
 		popl %edx
 		popl %ecx
-		cmpl $0,%eax
-		je change_counter
-
+		cmpl $0,%eax		#check whether status of the game has changed
+		je change_counter	##if no change the explode counter
+							##if yes notify user
 		#call mp1_notify_user
+		#caller save
 		pushl %ecx
 		pushl %edx
 		pushl %eax
-
+		
 		call mp1_notify_user
+		#caller restore
 		popl %eax
 		popl %edx
 		popl %ecx			
@@ -267,76 +280,76 @@ explosion_start:
 change_counter:		
 	
 		
-
+																	##########################################################magic number
 		########## first draw @
-		movl 8(%ebx),%esi
-		sarl $16,%esi
-		imull $160,%esi,%esi	
-		movl 4(%ebx),%edi
-		sarl $16,%edi
-		shll $1,%edi
-		addl %edi,%esi
-		movl %esi,%eax
-		movb $0x40,%cl					
+		movl Y(%ebx),%esi		####esi holds y
+		sarl $16,%esi			####shift right 16 bits because we need high 16 bits as coordinate
+		imull $POKECOL,%esi,%esi	####y*80*2
+		movl X(%ebx),%edi		####edi hols x
+		sarl $16,%edi			####shift right 16 bits because we need high 16 bits as coordinate
+		shll $1,%edi			####x*2
+		addl %edi,%esi			####y*80*2+x*2
+		movl %esi,%eax			
+		movb $0x40,%cl			####0x40 = @		
 		pushl %edx
 		call mp1_poke
 		popl %edx
 		########## change the counter and see whether it's 0. If 0, then we need remove it.
-		addl $-1,28(%ebx)
-		cmpl $0,28(%ebx)
+		addl $-1,EXPLODED(%ebx)
+		cmpl $0,EXPLODED(%ebx)
 		je	out_of_bound		
 		jmp update_return
 
 move_missile:  
 		#####first draw space to erase old
-		movl 8(%ebx),%esi
-		sarl $16,%esi
-		imull $160,%esi,%esi	
-		movl 4(%ebx),%edi
+		movl Y(%ebx),%esi			####same as  the code to draw explode above
+		sarl $16,%esi												###########################magic number
+		imull $POKECOL,%esi,%esi	
+		movl X(%ebx),%edi
 		sarl $16,%edi
 		shll $1,%edi
 		addl %edi,%esi
 		movl %esi,%eax
-		movl $0x20,%ecx					
+		movl $0x20,%ecx				###0x20	= space
 		pushl %edx
 		call mp1_poke
 		popl %edx		
 
 		###########then change xy
-		movl 12(%ebx),%esi  ## get vx
-		movl 16(%ebx),%edi  ## get vy
-		addl 4(%ebx),%esi	##x+vx
-		addl 8(%ebx),%edi	##y+vy
-		movl %esi,4(%ebx)
-		movl %edi,8(%ebx)
+		movl VX(%ebx),%esi  ## get vx
+		movl VY(%ebx),%edi  ## get vy
+		addl X(%ebx),%esi	##x+vx
+		addl Y(%ebx),%edi	##y+vy
+		movl %esi,X(%ebx)
+		movl %edi,Y(%ebx)
 		
-		#draw new missile
-		movl 8(%ebx),%esi	###get y
-		sarl $16,%esi
-		imull $160,%esi,%esi	
-		movl 4(%ebx),%edi	###get x
+		#draw new missile	same as drawing explode above
+		movl Y(%ebx),%esi	###get y									#######################################magic number
+		sarl $16,%esi		
+		imull $POKECOL,%esi,%esi	
+		movl X(%ebx),%edi	###get x
 		sarl $16,%edi
 		shll $1,%edi
 		addl %edi,%esi
 		movl %esi,%eax
-		movl 32(%ebx),%ecx					
+		movl C(%ebx),%ecx					
 		pushl %edx
 		call mp1_poke
 		popl %edx		
-		jmp update_return
+		jmp update_return	####go back to tasklet
 
 		
-out_of_bound:			####if it's out of bound or the exploded counter is 0
-		######first draw a space to erase old. then it should call remove
-		movl 8(%ebx),%esi
+out_of_bound:			####if it's out of bound or the exploded counter is 0, we should remove the missile
+		######first draw a space to erase old. same as  then it should call remove     #######################################magic number
+		movl Y(%ebx),%esi
 		sarl $16,%esi
-		imull $160,%esi,%esi	
-		movl 4(%ebx),%edi
+		imull $POKECOL,%esi,%esi	
+		movl X(%ebx),%edi
 		sarl $16,%edi
 		shll $1,%edi
 		addl %edi,%esi
 		movl %esi,%eax
-		movl $0x20,%ecx					
+		movl $0x20,%ecx					###0x20 = space
 		pushl %edx
 		call mp1_poke
 		popl %edx		
@@ -348,7 +361,7 @@ out_of_bound:			####if it's out of bound or the exploded counter is 0
 
 		pushl %eax        ####caller save
 		##############################not saving ecx and edx because they are pointer in the traversal in tasklet they might change during remove and the change is important
-		pushl %edx
+		pushl %edx		 ####parameter
 		pushl %ecx
 		call mp1_missile_remove
 		addl $12,%esp
@@ -363,7 +376,13 @@ update_return:
 		leave
 		ret
 		
-		
+# void mp1_missile_remove(int* prev, int* curr);
+# Performs 2 tasks:
+#	(1) check if it's head, middile or tail
+#	(2)then remove it from list
+# Inputs   : prev = pointer to previous node of current node, curr = current node pointer
+# Outputs  : none
+# Registers: Standard C calling convention		
 mp1_missile_remove:
 		####### callee save
 		pushl %ebp
@@ -432,27 +451,41 @@ head_change:
 
 
 	
-
+# void mp1_ioctl_startgame();
+# Performs one task:
+#	(1) initialize missile head, base status, score, crosshair
+# Inputs   : none
+# Outputs  : none
+# Registers: Standard C calling convention		
 mp1_ioctl_startgame:
+		#####callee save
 		pushl %ebp
 		movl %esp, %ebp
 		pushl %ebx
 		pushl %esi
 		pushl %edi
-		
+		#####initialization
 		movl $0, mp1_missile_list
 		movl $0x00ffffff, base_alive
 		movl $0, mp1_score
 		movl $40, crosshairs_x
 		movl $12, crosshairs_y
-
+		####callee tear down
 		popl %edi
 		popl %esi
 		popl %ebx
 		leave
 		ret
 
+		
+#int mp1 ioctl addmissile (struct missile* user missile);
+# Performs one tasks:
+#	(1)  copy the user’s missile into a dynamically allocated buffer in kernel space
+# Inputs   : pointer to the missile struct
+# Outputs  : success or fail: 0 or -1
+# Registers: Standard C calling convention
 mp1_ioctl_addmissile:
+		####callee save
 		pushl %ebp
 		movl %esp, %ebp
 		pushl %ebx
@@ -460,45 +493,46 @@ mp1_ioctl_addmissile:
 		pushl %edi
 
 		movl 8(%ebp),%edi  ##struct pointer
-		
+		###### malloc first 
 		#caller save register
 		pushl %ecx
 		pushl %edx
-
+		###not saving eax because it holds the return value from mp1_malloc
 		#push parameter
-		pushl $36			#36 is the size of struct
+		pushl $36			#36 is the size of struct							###############magic number
 		call mp1_malloc
 		addl $4,%esp
 		#restore register
 		popl %edx
 		popl %ecx
 		
-		cmpl $0,%eax
-		je malloc_fail ########## if return 0 fail
+		cmpl $0,%eax   ########## check whether the return value is 0
+		je malloc_fail ########## if return 0 fail, if non-zero, success and is the pointer to the address we just allocate
 		
 		#caller save registers
 		pushl %ecx
 		pushl %edx
 		pushl %eax
 		
+		#copy from user
 		#push parameter		
 		pushl $36
-		pushl %edi
-		pushl %eax
+		pushl %edi		##struct pointer
+		pushl %eax		##pointer to memory we just malloc
 		call mp1_copy_from_user   
 		addl $12,%esp
 		
-		cmpl $0,%eax
-		jne free
+		cmpl $0,%eax	##check return value 
+		jne free		##not 0, bad copy, free memory 
 		#restore registers
 		popl %eax
 		popl %edx
 		popl %ecx
-		
-		movl mp1_missile_list, %edx
-		movl %edx, (%eax)
+		##########  add to head
+		movl mp1_missile_list, %edx	#edx holds the head pointer
+		movl %edx, (%eax)  #update new head
 		movl %eax,mp1_missile_list
-		
+		##callee restore
 		popl %edi
 		popl %esi
 		popl %ebx
@@ -524,13 +558,20 @@ free:
 		popl %ecx
 
 malloc_fail:	
+		## return -1
 		movl $-1,%eax
 		popl %edi
 		popl %esi
 		popl %ebx
 		leave
 		ret
-		
+
+#int mp1 ioctl movexhairs (unsigned long xhair delta packed);
+# Performs one tasks:
+#	(1) This function moves the crosshairs
+# Inputs   : xhair_delta_packed = number containing the change of xy of the crosshair
+# Outputs  : success = 0
+# Registers: Standard C calling convention		
 mp1_ioctl_movexhairs:
 		#callee save
 		pushl %ebp
@@ -539,23 +580,24 @@ mp1_ioctl_movexhairs:
 		pushl %esi
 		pushl %edi
 		
-		movl 8(%ebp),%esi  #get x,y from the stack
+		movl 8(%ebp),%esi  #get delta x,y from the stack
 		xorl %ebx,%ebx   #clear ebx
-		movw %si,%bx	#move low si to bx :x value
-		sall $16,%ebx
+		movw %si,%bx	#move low si to bx :get x value
+		sall $16,%ebx	sign extend x value
 		sarl $16,%ebx
 		sarl $16,%esi	#shift esi to right 16bits: y value  
 		
-		addl crosshairs_y,%esi
+		addl crosshairs_y,%esi #change x,y value 
 		addl crosshairs_x,%ebx
-		cmpl $0,%esi
+		#check whether is out of bound
+		cmpl $0,%esi				
 		jl less_than_zero_y
-		cmpl $24,%esi
+		cmpl $POKEROW,%esi
 		jg greater_than_24_y
 		 
 		cmpl $0,%ebx
 		jl less_than_zero_x
-		cmpl $79,%ebx
+		cmpl $COL,%ebx
 		jg greater_than_79_x
 		jmp update		
 		
@@ -565,7 +607,7 @@ less_than_zero_y:
 		jmp update
 		
 greater_than_24_y:
-		movl $24,%esi
+		movl $POKEROW,%esi
 		jmp update
 		
 less_than_zero_x:
@@ -573,31 +615,32 @@ less_than_zero_x:
 		jmp update
 		
 greater_than_79_x:
-		movl $79,%ebx
+		movl $COL,%ebx
 		jmp update
 		
 update:
-		imull $160,crosshairs_y,%eax 	
+		##draw space y*80*2+x*2
+		imull $POKECOL,crosshairs_y,%eax 	
 		movl crosshairs_x,%edi
 		shll $1,%edi
 		addl %edi,%eax					
-		movb $0x20,%cl					
+		movb $0x20,%cl					####0x20 = space
 		
 		pushl %edx
 		call mp1_poke
 		popl %edx		
 
-
+		#save  new value
 		movl %ebx,crosshairs_x
 		movl %esi,crosshairs_y
-		jmp draw
 		
 draw:
-		imull $160,crosshairs_y,%eax 	
+		#draw new crosshair same as above
+		imull $POKECOL,crosshairs_y,%eax 	
 		movl crosshairs_x,%edi
 		shll $1,%edi
 		addl %edi,%eax					
-		movb $0x2B,%cl					
+		movb $CROSSHAIR,%cl					
 		
 		pushl %edx
 		call mp1_poke
@@ -610,7 +653,13 @@ draw:
 		popl %ebx
 		leave
 		ret
-		
+
+# int mp1 ioctl getstatus (unsigned long* user status);
+# Performs one tasks:
+#	(1) this function get status of score and city
+# Inputs   : user_status = The argument is a pointer to a 32-bit integer in user space
+# Outputs  : success = 0, fail = -1
+# Registers: Standard C calling convention			
 mp1_ioctl_getstatus:
 		#callee save
 		pushl %ebp
@@ -620,7 +669,7 @@ mp1_ioctl_getstatus:
 		pushl %edi
 
 		movl 8(%ebp),%esi #esi carries the pointer
-		
+		###### first check 3 cities		
 		movl base_alive,%edi	
 		sall $8,%edi
 		xorl %ebx,%ebx    #ebx stores the return value, clear it
@@ -643,37 +692,37 @@ move_next:
 		jmp loop
 
 loop_done:
-		sall $15,%ebx    	##make room for score
+		sall $15,%ebx    	##make room for score,16 bits in total, but we already did one in loop
 		movl mp1_score,%ecx	
-		movw %cx,%bx
+		movw %cx,%bx		##save score
 		
 		pushl %ebx		    ##push the score onto the stack
-		movl %esp,%ecx
+		movl %esp,%ecx		##ecx holds the location of the score 
 		
 		##caller save
 		pushl %ecx
 		pushl %edx
 		pushl %eax
 		
-		pushl $4
+		pushl $4			##length
 		pushl %ecx			##push the pointer to the score to the stack as parameter (from)
-		pushl %esi
+		pushl %esi			##the address to copy to
 		call mp1_copy_to_user
 		addl $12,%esp
 		
-		cmpl $0,%eax
-		je copy_to_success
-		popl %eax
-		movl $-1,%eax
+		cmpl $0,%eax		##check success
+		je copy_to_success	##if 0 go to success
+		popl %eax			##we don't need the return value anymore, pop caller save
+		movl $-1,%eax		##fail, return -1
 		jmp status_done
 		##caller restore
 copy_to_success:
-		popl %eax
-		movl $0,%eax
+		popl %eax			##success return 0
+		movl $0,%eax		
 
 status_done:
 		popl %edx
-		popl %ecx		
+		popl %ecx			##pop remaining caller saved registers
 		
 		#callee restore
 		popl %edi
@@ -682,6 +731,12 @@ status_done:
 		leave
 		ret		
 
+#int mp1 ioctl endgame (unsigned long ignore);
+# Performs one tasks:
+#	(1) free everything when game ends
+# Inputs   : none
+# Outputs  : success = 0
+# Registers: Standard C calling convention	
 mp1_ioctl_endgame:
 		####callee save
 		pushl %ebp
@@ -715,6 +770,7 @@ endgame_loop:
 		jmp endgame_loop
 endgame_done:
 		#callee restore
+		movl $0,%eax   ##return 0 success
 		popl %edi
 		popl %esi
 		popl %ebx
