@@ -316,6 +316,19 @@ out_of_bound:			####if it's out of bound or the exploded counter is 0
 		pushl %edx
 		pushl %eax
 		
+		movl 8(%ebx),%esi
+		sarl $16,%esi
+		imull $160,%esi,%esi	
+		movl 4(%ebx),%edi
+		sarl $16,%edi
+		shll $1,%edi
+		addl %edi,%esi
+		movl %esi,%eax
+		movl $0x20,%ecx					
+		pushl %edx
+		
+		call mp1_poke
+		popl %edx		
 		pushl %ebx	#push parameter of the pointer
 		call mp1_missile_remove
 		addl $4,%esp
@@ -340,6 +353,10 @@ mp1_missile_remove:
 		pushl %esi
 		pushl %edi
 
+		popl %edi
+		popl %esi
+		popl %ebx
+		leave
 		ret
 
 
