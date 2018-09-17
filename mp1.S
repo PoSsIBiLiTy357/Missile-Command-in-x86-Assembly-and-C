@@ -92,11 +92,11 @@ traverse_loop:
 		##########caller save  (not saving ecx edx because they are used as pointer in the traversal, they may change when removed)
 		pushl %eax
 
-		pushl %edx						#######ecx stores previous pointer. parameter
-		pushl %ecx						#######edx sotres current pointer.	parameter
+		pushl %edx						#######edx stores previous pointer. push parameter
+		pushl %ecx						#######ecx sotres current pointer.	push parameter
         call update_missiles
 		addl $8, %esp
-		##########caller pop		
+		##########caller restore		
 		popl %eax
 
 
@@ -109,15 +109,19 @@ traverse_loop:
 
 traverse_done:
 
-		###################start draw cities
-		###################ebx as the city pic address carrier
+		#####start draw cities
+		####ebx as the city pic address carrier
+		####for(3 cities){
+		####     get status
+		####     outer_counter --
+		####	 for()
 		movl $2,%esi	#set esi as city counter
 		movl $4,%edi	#set edi as the char counter
 		movl base_alive, %edx 	#put base status into edx
-		sall $8,%edx
+		sall $8,%edx			##shift 8 bits to eliminate padding
 		movl $24,%eax		#initialize eax
-		imull $160,%eax,%eax		
-		addl $116,%eax
+		imull $160,%eax,%eax		##########################################################magic number
+		addl $116,%eax				##########################################################magic number
 
 		############outer loop start
 outer_loop:	
